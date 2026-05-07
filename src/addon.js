@@ -5,7 +5,7 @@ const MANIFEST = {
     version: "3.4.0",
     name: "ShowBox",
     description: "ShowBox — Unofficial Stremio addon for FebBox streams.",
-    logo: "https://i.imgur.com/vH1rWjK.png",
+    logo: "https://raw.githubusercontent.com/adarsh0s/Showbox/refs/heads/main/src/icon.png",
     resources: ["stream"],
     types: ["movie", "series"],
     catalogs: [],
