@@ -87,7 +87,8 @@ export async function handleStream(request, type, id, config, proxyBase, tmdbApi
             let finalUrl = l.url;
             if (config.useProxy === true) {
                 const base = (config.customProxyUrl || proxyBase).replace(/\/$/, "");
-                finalUrl = `${base}/proxy?url=${encodeURIComponent(l.url)}`;
+                const safeName = encodeURIComponent(v.name || "video.mp4");
+                finalUrl = `${base}/proxy/${safeName}?url=${encodeURIComponent(l.url)}`;
             }
 
             streams.push({
