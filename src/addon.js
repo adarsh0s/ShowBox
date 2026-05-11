@@ -53,7 +53,7 @@ export async function handleStream(request, type, id, config, proxyBase, tmdbApi
         region = map[country] || "USA7";
     }
 
-    const data = await getStreamsFromTmdbId(meta.tmdbType, meta.tmdbId, season, episode, region, activeCookieData.cookie, tmdbApiKey);
+    const data = await getStreamsFromTmdbId(meta.tmdbType, meta, season, episode, region, activeCookieData.cookie, tmdbApiKey);
     if (!data?.versions) return { streams: [] };
 
     let streams = [];
