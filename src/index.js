@@ -48,7 +48,7 @@ export default {
         if (request.method === "OPTIONS") return handlePreflight(request);
 
         // API Endpoints
-        if (path === "/proxy") return handleProxy(request, env);
+        if (path.startsWith("/proxy")) return handleProxy(request, env);
         if (path === "/api/validate-cookie" && request.method === "POST") return handleValidateCookie(request);
         if (path === "/api/febbox-flow" && request.method === "POST") return handleFebboxFlow(request);
 
