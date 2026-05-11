@@ -23,39 +23,29 @@ export async function convertImdbToTmdb(imdbId, expectedType, apiKey) {
     return null;
 }
 
-export async function getStreamsFromTmdbId(tmdbType, tmdbId, seasonNum, episodeNum, regionPreference, cookieStr, tmdbApiKey) {
+export async function getStreamsFromTmdbId(tmdbType, meta, seasonNum, episodeNum, regionPreference, cookieStr, tmdbApiKey) {
     const showboxAPI = new ShowboxAPI();
     const febboxAPI = new FebboxAPI();
     
     if (cookieStr) febboxAPI._setAuthCookie(cookieStr.replace('ui=', '').trim());
 
     try {
-        // 1. Fetch TMDB Metadata
-        const tmdbUrl = tmdbType === 'tv' 
-            ? `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${tmdbApiKey}`
-            : `${TMDB_BASE_URL}/movie/${tmdbId}?api_key=${tmdbApiKey}`;
-        
-        const tmdbRes = await fetch(tmdbUrl);
-        if (!tmdbRes.ok) return { versions: [] };
-        const tmdbData = await tmdbRes.json();
-        
-        const title = tmdbType === 'tv' ? tmdbData.name : tmdbData.title;
-        const releaseYear = tmdbType === 'tv' 
-            ? (tmdbData.first_air_date ? tmdbData.first_air_date.split('-')[0] : null)
-            : (tmdbData.release_date ? tmdbData.release_date.split('-')[0] : null);
+        const title = meta.title;
+        const releaseYear = meta.year;
+        if (!title) return { versions: [] };
 
-        // 2. Search Showbox
+        // Search Showbox
         const showboxResults = await showboxAPI.search(title, tmdbType === 'tv' ? 'tv' : 'movie');
         if (!showboxResults || showboxResults.length === 0) return { versions: [] };
 
         let showboxItem = showboxResults.find(item => item.title.toLowerCase() === title.toLowerCase() && item.year == releaseYear);
         if (!showboxItem) showboxItem = showboxResults.find(item => item.title.toLowerCase() === title.toLowerCase()) || showboxResults[0];
 
-        // 3. Get FebBox ID
+        // Get FebBox ID
         const febBoxId = await showboxAPI.getFebBoxId(showboxItem.id, showboxItem.box_type);
         if (!febBoxId) return { versions: [] };
 
-        // 4. File List Navigation
+        // File List Navigation
         let targetFid = null;
         let fileName = title; // Default fallback
 
@@ -85,7 +75,7 @@ export async function getStreamsFromTmdbId(tmdbType, tmdbId, seasonNum, episodeN
             fileName = episodeFile.file_name; // Capture actual filename
         }
 
-        // 5. Extract Stream Links
+        // Extract Stream Links
         const links = await febboxAPI.getLinks(febBoxId, targetFid);
         
         if (links && links.length > 0) {
