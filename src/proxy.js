@@ -27,36 +27,56 @@ export async function handleProxy(request, env) {
     for (const [name, value] of request.headers.entries()) {
         if (!HOP_BY_HOP_REQUEST.has(name.toLowerCase())) upstreamHeaders.set(name, value);
     }
-    upstreamHeaders.set("referer", `${targetUrl.origin}/`);
-    upstreamHeaders.set("origin", targetUrl.origin);
+    
+    // CRITICAL FIX 1: Prevent compression so Content-Length is preserved.
+    // Without Content-Length, the video player cannot demux or seek.
+    upstreamHeaders.delete("accept-encoding");
 
-    try {
-        const upstreamResponse = await fetch(targetUrl.toString(), {
+    let response;
+    let redirectCount = 0;
+    let currentTarget = targetUrl;
+
+    // CRITICAL FIX 2: Manually follow redirects. 
+    // Standard fetch() with redirect: "follow" drops the "Range" header on cross-origin redirects.
+    // This loops through the redirects manually while keeping the original Headers.
+    while (redirectCount < 5) {
+        upstreamHeaders.set("referer", `${currentTarget.origin}/`);
+        upstreamHeaders.set("origin", currentTarget.origin);
+
+        response = await fetch(currentTarget.toString(), {
             method: request.method,
             headers: upstreamHeaders,
-            redirect: "follow",
+            redirect: "manual",
         });
 
-        const clientHeaders = new Headers();
-        for (const [name, value] of upstreamResponse.headers.entries()) {
-            if (!HOP_BY_HOP_RESPONSE.has(name.toLowerCase())) clientHeaders.set(name, value);
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+            const location = response.headers.get("location");
+            if (location) {
+                currentTarget = new URL(location, currentTarget);
+                redirectCount++;
+                continue;
+            }
         }
-        
-        const origin = request.headers.get("origin");
-        if (origin) {
-            clientHeaders.set("access-control-allow-origin", origin);
-            clientHeaders.set("access-control-allow-credentials", "true");
-        } else {
-            clientHeaders.set("access-control-allow-origin", "*");
-        }
-        clientHeaders.set("access-control-expose-headers", "Content-Length, Content-Range, Content-Type, Accept-Ranges");
-
-        return new Response(upstreamResponse.body, {
-            status: upstreamResponse.status,
-            statusText: upstreamResponse.statusText,
-            headers: clientHeaders,
-        });
-    } catch (err) {
-        return new Response(`Proxy Error: ${err.message}`, { status: 502 });
+        break;
     }
+
+    const clientHeaders = new Headers();
+    for (const [name, value] of response.headers.entries()) {
+        if (!HOP_BY_HOP_RESPONSE.has(name.toLowerCase())) clientHeaders.set(name, value);
+    }
+    
+    const origin = request.headers.get("origin");
+    if (origin) {
+        clientHeaders.set("access-control-allow-origin", origin);
+        clientHeaders.set("access-control-allow-credentials", "true");
+    } else {
+        clientHeaders.set("access-control-allow-origin", "*");
+    }
+    clientHeaders.set("access-control-expose-headers", "Content-Length, Content-Range, Content-Type, Accept-Ranges");
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: clientHeaders,
+    });
 }
