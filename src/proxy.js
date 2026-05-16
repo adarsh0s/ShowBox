@@ -1,82 +1,107 @@
-const HOP_BY_HOP_REQUEST = new Set([
-    "host", "connection", "keep-alive", "proxy-authorization",
-    "te", "trailers", "transfer-encoding", "upgrade",
-    "cf-connecting-ip", "cf-ipcountry", "cf-ray", "cf-visitor",
-    "x-forwarded-for", "x-forwarded-proto", "x-real-ip",
-]);
-  
-const HOP_BY_HOP_RESPONSE = new Set([
-    "connection", "keep-alive", "proxy-authenticate", "proxy-connection",
-    "te", "trailers", "transfer-encoding", "upgrade", "alt-svc",
-]);
-
 export async function handleProxy(request, env) {
+    // 1. Handle CORS Preflight
+    if (request.method === "OPTIONS") {
+        return new Response(null, {
+            headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers": request.headers.get("Access-Control-Request-Headers") || "*",
+                "Access-Control-Max-Age": "86400"
+            }
+        });
+    }
+
     if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method not allowed", { status: 405 });
     }
 
     const url = new URL(request.url);
-    const rawTarget = url.searchParams.get("url");
-    if (!rawTarget) return new Response('Missing "url"', { status: 400 });
+    const target = url.searchParams.get("url");
+    if (!target) return new Response("Missing target URL", { status: 400 });
 
-    let targetUrl;
-    try { targetUrl = new URL(rawTarget); } catch { return new Response("Invalid URL", { status: 400 }); }
-    if (!["http:", "https:"].includes(targetUrl.protocol)) return new Response("Invalid protocol", { status: 400 });
-
+    // 2. Build Upstream Headers
     const upstreamHeaders = new Headers();
-    for (const [name, value] of request.headers.entries()) {
-        if (!HOP_BY_HOP_REQUEST.has(name.toLowerCase())) upstreamHeaders.set(name, value);
-    }
-    
-    // CRITICAL FIX 1: Prevent compression so Content-Length is preserved.
-    // Without Content-Length, the video player cannot demux or seek.
-    upstreamHeaders.delete("accept-encoding");
+    if (request.headers.has("range")) upstreamHeaders.set("range", request.headers.get("range"));
+    if (request.headers.has("if-range")) upstreamHeaders.set("if-range", request.headers.get("if-range"));
 
-    let response;
-    let redirectCount = 0;
-    let currentTarget = targetUrl;
+    // Spoof browser to bypass CDN blocks
+    upstreamHeaders.set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+    upstreamHeaders.set("accept-encoding", "identity");
 
-    // CRITICAL FIX 2: Manually follow redirects. 
-    // Standard fetch() with redirect: "follow" drops the "Range" header on cross-origin redirects.
-    // This loops through the redirects manually while keeping the original Headers.
-    while (redirectCount < 5) {
-        upstreamHeaders.set("referer", `${currentTarget.origin}/`);
-        upstreamHeaders.set("origin", currentTarget.origin);
+    // 3. Fetch from CDN
+    const response = await fetch(target, {
+        method: request.method,
+        headers: upstreamHeaders,
+        redirect: "follow"
+    });
 
-        response = await fetch(currentTarget.toString(), {
-            method: request.method,
-            headers: upstreamHeaders,
-            redirect: "manual",
+    const clientHeaders = new Headers(response.headers);
+    clientHeaders.set("access-control-allow-origin", "*");
+    clientHeaders.set("access-control-expose-headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
+
+    // 4. HLS M3U8 Rewriter
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    const isM3U8 = target.includes(".m3u8") || contentType.includes("mpegurl");
+
+    if (isM3U8 && request.method === "GET") {
+        let text = await response.text();
+        const proxyBase = `${url.origin}${url.pathname}?url=`;
+
+        // Rewrite internal Key URIs
+        text = text.replace(/URI="(.*?)"/g, (match, p1) => {
+            let absoluteUrl = p1;
+            if (!p1.startsWith('http')) {
+                try { absoluteUrl = new URL(p1, target).toString(); } catch (e) { return match; }
+            }
+            return `URI="${proxyBase}${encodeURIComponent(absoluteUrl)}"`;
         });
 
-        if ([301, 302, 303, 307, 308].includes(response.status)) {
-            const location = response.headers.get("location");
-            if (location) {
-                currentTarget = new URL(location, currentTarget);
-                redirectCount++;
-                continue;
+        // Rewrite chunk URLs
+        const rewrittenLines = text.split('\n').map(line => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) return line; 
+            
+            let absoluteUrl = trimmed;
+            if (!trimmed.startsWith('http')) {
+                try { absoluteUrl = new URL(trimmed, target).toString(); } catch (e) { return line; }
             }
-        }
-        break;
+            return `${proxyBase}${encodeURIComponent(absoluteUrl)}`;
+        });
+
+        const rewrittenM3u8 = rewrittenLines.join('\n');
+        
+        clientHeaders.set("content-length", rewrittenM3u8.length.toString());
+        clientHeaders.set("content-type", "application/vnd.apple.mpegurl");
+        clientHeaders.delete("content-disposition"); // DO NOT force download for m3u8 playlists
+        
+        return new Response(rewrittenM3u8, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: clientHeaders
+        });
     }
 
-    const clientHeaders = new Headers();
-    for (const [name, value] of response.headers.entries()) {
-        if (!HOP_BY_HOP_RESPONSE.has(name.toLowerCase())) clientHeaders.set(name, value);
-    }
+    // 5. Normal Video Chunk Handling
+    if (!clientHeaders.has("accept-ranges")) clientHeaders.set("accept-ranges", "bytes");
     
-    const origin = request.headers.get("origin");
-    if (origin) {
-        clientHeaders.set("access-control-allow-origin", origin);
-        clientHeaders.set("access-control-allow-credentials", "true");
-    } else {
-        clientHeaders.set("access-control-allow-origin", "*");
+    if (!clientHeaders.has("content-type")) {
+        if (target.includes('.ts')) clientHeaders.set("content-type", "video/mp2t");
+        else clientHeaders.set("content-type", "video/mp4");
     }
-    clientHeaders.set("access-control-expose-headers", "Content-Length, Content-Range, Content-Type, Accept-Ranges");
 
-    return new Response(response.body, {
+    // Only apply download disposition to actual files, not M3U8/TS chunks
+    if (!isM3U8 && !target.includes('.ts')) {
+        const filename = encodeURIComponent(url.pathname.split('/').pop() || "video.mp4");
+        clientHeaders.set("content-disposition", `inline; filename="${filename}"`);
+    } else {
+        clientHeaders.delete("content-disposition");
+    }
+
+    const body = request.method === "HEAD" ? null : response.body;
+
+    return new Response(body, {
         status: response.status,
         statusText: response.statusText,
-        headers: clientHeaders,
+        headers: clientHeaders
     });
-}
+    }
