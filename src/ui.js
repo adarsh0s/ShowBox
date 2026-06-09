@@ -266,8 +266,7 @@ export const CONFIG_HTML = `<!DOCTYPE html>
             </div>
         </div>
     </div>
-
-    <script>
+        <script>
         let mainCookieFlow = null;
         let nsMultiCookies = [];
 
@@ -351,11 +350,11 @@ export const CONFIG_HTML = `<!DOCTYPE html>
             const label = document.getElementById('quotaLabel');
             const fill  = document.getElementById('quotaFill');
             if (limit <= 0) {
-                label.textContent = `⚡ ${formatMB(remaining)} (No Limit)`;
+                label.textContent = \`⚡ \${formatMB(remaining)} (No Limit)\`;
                 fill.style.width = '100%'; fill.className = 'quota-bar-fill';
             } else {
                 const pct = Math.round((remaining / limit) * 100);
-                label.textContent = `⚡ ${formatMB(remaining)} / ${formatMB(limit)}`;
+                label.textContent = \`⚡ \${formatMB(remaining)} / \${formatMB(limit)}\`;
                 fill.style.width = pct + '%';
                 fill.className = 'quota-bar-fill' + (pct <= 10 ? ' empty' : pct <= 30 ? ' low' : '');
             }
@@ -406,18 +405,18 @@ export const CONFIG_HTML = `<!DOCTYPE html>
                 let statusColor = 'var(--border)';
                 if (item.isValid === true) statusColor = 'var(--success)';
                 if (item.isValid === false) statusColor = 'var(--danger)';
-                list.innerHTML += `
+                list.innerHTML += \`
                     <div class="cookie-card">
                         <div class="cookie-info">
                             <div class="cookie-title">
-                                <div style="width:6px; height:6px; border-radius:50%; background:${statusColor};"></div>
-                                Token ${idx+1} <span class="cookie-hash">#${idShort}</span>
+                                <div style="width:6px; height:6px; border-radius:50%; background:\${statusColor};"></div>
+                                Token \${idx+1} <span class="cookie-hash">#\${idShort}</span>
                             </div>
-                            <div class="cookie-hash" style="margin-top:2px;">${remaining !== null ? `⚡ ${formatMB(remaining)}` : 'Unknown'}</div>
+                            <div class="cookie-hash" style="margin-top:2px;">\${remaining !== null ? \`⚡ \${formatMB(remaining)}\` : 'Unknown'}</div>
                         </div>
-                        <button class="btn-sm-danger" onclick="removeCookie(${idx})">Remove</button>
+                        <button class="btn-sm-danger" onclick="removeCookie(\${idx})">Remove</button>
                     </div>
-                `;
+                \`;
             });
         }
 
@@ -451,7 +450,7 @@ export const CONFIG_HTML = `<!DOCTYPE html>
                 showboxHasQuota
             };
 
-            const b64 = btoa(JSON.stringify(config)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            const b64 = btoa(JSON.stringify(config)).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
             let manifest = window.location.origin + '/' + b64 + '/manifest.json';
             
             if (cookiesArr.length === 0 && config.showboxRegion === 'Auto' && config.sbMinQuality === 'all' && !config.useProxy) {
@@ -459,7 +458,7 @@ export const CONFIG_HTML = `<!DOCTYPE html>
             }
 
             document.getElementById('manifestUrl').innerText = manifest;
-            document.getElementById('installBtn').href = manifest.replace(/^https?:\/\//, 'stremio://');
+            document.getElementById('installBtn').href = manifest.replace(/^https?:\\/\\//, 'stremio://');
         }
 
         function copyManifest() {
